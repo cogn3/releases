@@ -144,14 +144,28 @@ install_skill() {
 # ---------------------------------------------------------------------------
 
 verify_install() {
-    if ! command -v "${BINARY_NAME}" >/dev/null 2>&1; then
-        warn "${BINARY_NAME} is installed at ${INSTALL_DIR}/${BINARY_NAME} but not on PATH."
-        warn "Add ${INSTALL_DIR} to your PATH to use it."
+    target_path="${INSTALL_DIR}/${BINARY_NAME}"
+
+    # Always verify the binary we just installed, not whatever 'cs' resolves to on PATH.
+    if [ -x "${target_path}" ]; then
+        version="$("${target_path}" --version 2>/dev/null || echo unknown)"
+        info "Installed cs version: ${version}"
+    else
+        warn "Binary not found at ${target_path} after install."
         return 0
     fi
 
-    version="$("${BINARY_NAME}" --version 2>/dev/null || echo unknown)"
-    info "Installed cs version: ${version}"
+    # Warn if the user's PATH would resolve 'cs' to something else.
+    if command -v "${BINARY_NAME}" >/dev/null 2>&1; then
+        resolved="$(command -v "${BINARY_NAME}")"
+        if [ "${resolved}" != "${target_path}" ]; then
+            warn "Another '${BINARY_NAME}' is earlier on PATH: ${resolved}"
+            warn "It will be used instead of ${target_path}."
+            warn "Remove it (e.g. 'npm unlink -g cogentry-substrate') or reorder PATH."
+        fi
+    else
+        warn "${INSTALL_DIR} is not on PATH; add it to use '${BINARY_NAME}' globally."
+    fi
 }
 
 # ---------------------------------------------------------------------------
