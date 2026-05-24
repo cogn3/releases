@@ -5,6 +5,7 @@
 #   curl -fsSL https://github.com/cogn3/releases/raw/main/substrate/install.sh | sh
 #
 # Options:
+#   --version <ver>   Install specific version (e.g., v0.2.0). Default: latest
 #   --local <path>    Install skills from local codebase instead of downloading
 #   --skill-only      Only install skills (skip binary)
 #
@@ -24,13 +25,14 @@ SKILL_NAME="cogentry-substrate"
 SKILL_DIR="${HOME}/.config/opencode/skills/${SKILL_NAME}"
 OPENCODE_DIR="${HOME}/.config/opencode"
 
-LATEST_BASE_URL="https://github.com/${RELEASES_REPO}/releases/latest/download"
-SKILL_BASE_URL="https://github.com/${RELEASES_REPO}/raw/main/substrate/skills"
+RELEASES_BASE_URL="https://github.com/${RELEASES_REPO}/releases"
+LATEST_BASE_URL="${RELEASES_BASE_URL}/latest/download"
 SKILL_FILES="SKILL.md commands.md workflows.md search.md specs.md domains.md"
 
 # Command-line options
 LOCAL_PATH=""
 SKILL_ONLY=false
+VERSION=""
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -56,6 +58,10 @@ error() {
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
+            --version|-v)
+                VERSION="$2"
+                shift 2
+                ;;
             --local)
                 LOCAL_PATH="$2"
                 shift 2
@@ -65,9 +71,10 @@ parse_args() {
                 shift
                 ;;
             -h|--help)
-                echo "Usage: install.sh [--local <path>] [--skill-only]"
+                echo "Usage: install.sh [--version <ver>] [--local <path>] [--skill-only]"
                 echo ""
                 echo "Options:"
+                echo "  --version <ver>   Install specific version (e.g., v0.2.0). Default: latest"
                 echo "  --local <path>    Install skills from local codebase"
                 echo "  --skill-only      Only install skills (skip binary)"
                 exit 0
@@ -114,6 +121,9 @@ check_prerequisites() {
     if ! command -v curl >/dev/null 2>&1; then
         error "curl is required but not installed."
     fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        error "unzip is required but not installed."
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -123,22 +133,42 @@ check_prerequisites() {
 install_binary() {
     platform="$1"
     binary_filename="cs-${platform}"
-    binary_url="${LATEST_BASE_URL}/${binary_filename}"
+    zip_filename="${binary_filename}.zip"
+    
+    # Determine download URL based on version
+    if [ -n "${VERSION}" ]; then
+        download_url="${RELEASES_BASE_URL}/download/${VERSION}/${zip_filename}"
+        info "Installing version: ${VERSION}"
+    else
+        download_url="${LATEST_BASE_URL}/${zip_filename}"
+        info "Installing latest version"
+    fi
+    
     target_path="${INSTALL_DIR}/${BINARY_NAME}"
 
     info "Detected platform: ${platform}"
-    info "Downloading ${binary_filename} from latest release..."
+    info "Downloading ${zip_filename}..."
 
     tmp_dir="$(mktemp -d)"
     trap 'rm -rf "${tmp_dir}"' EXIT
-    tmp_binary="${tmp_dir}/${BINARY_NAME}"
+    tmp_zip="${tmp_dir}/${zip_filename}"
+    tmp_binary="${tmp_dir}/${binary_filename}"
 
-    if ! curl -fsSL -o "${tmp_binary}" "${binary_url}"; then
-        error "Failed to download ${binary_url}.
+    if ! curl -fsSL -o "${tmp_zip}" "${download_url}"; then
+        error "Failed to download ${download_url}.
 
-This usually means there is no published binary for your platform yet.
-Currently supported: darwin-arm64. See https://github.com/${RELEASES_REPO}/releases"
+This usually means there is no published binary for your platform/version.
+Currently supported: darwin-arm64. See ${RELEASES_BASE_URL}"
     fi
+    
+    info "Extracting ${zip_filename}..."
+    if ! unzip -o -q "${tmp_zip}" -d "${tmp_dir}"; then
+        error "Failed to extract ${zip_filename}."
+    fi
+    
+    # Rename to standard binary name
+    mv "${tmp_binary}" "${tmp_dir}/${BINARY_NAME}"
+    tmp_binary="${tmp_dir}/${BINARY_NAME}"
 
     chmod +x "${tmp_binary}"
 
@@ -187,9 +217,22 @@ install_skill() {
             fi
         done
     else
-        # Remote mode: download from releases repo
+        # Remote mode: download from version-specific skills folder
+        if [ -n "${VERSION}" ]; then
+            skill_base_url="https://github.com/${RELEASES_REPO}/raw/main/substrate/${VERSION}/skills"
+        else
+            # For latest, we need to determine the latest version first
+            # Fall back to using the latest tag's skills
+            skill_base_url="https://github.com/${RELEASES_REPO}/raw/main/substrate/skills"
+            # Try to get latest version tag
+            latest_version="$(curl -fsSL -o /dev/null -w '%{url_effective}' "${RELEASES_BASE_URL}/latest" 2>/dev/null | sed 's|.*/||')"
+            if [ -n "${latest_version}" ] && [ "${latest_version}" != "latest" ]; then
+                skill_base_url="https://github.com/${RELEASES_REPO}/raw/main/substrate/${latest_version}/skills"
+            fi
+        fi
+        
         for skill_file in ${SKILL_FILES}; do
-            skill_url="${SKILL_BASE_URL}/${skill_file}"
+            skill_url="${skill_base_url}/${skill_file}"
             if ! curl -fsSL -o "${SKILL_DIR}/${skill_file}" "${skill_url}"; then
                 warn "Failed to download ${skill_file} from ${skill_url}; skipping."
             else
