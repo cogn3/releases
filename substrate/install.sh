@@ -4,6 +4,10 @@
 # Usage:
 #   curl -fsSL https://github.com/cogn3/releases/raw/main/substrate/install.sh | sh
 #
+# Options:
+#   --local <path>    Install skills from local codebase instead of downloading
+#   --skill-only      Only install skills (skip binary)
+#
 # Installs the `cs` binary to /usr/local/bin and (if OpenCode is detected)
 # the cogentry-substrate skill to ~/.config/opencode/skills/cogentry-substrate/.
 
@@ -21,7 +25,12 @@ SKILL_DIR="${HOME}/.config/opencode/skills/${SKILL_NAME}"
 OPENCODE_DIR="${HOME}/.config/opencode"
 
 LATEST_BASE_URL="https://github.com/${RELEASES_REPO}/releases/latest/download"
-SKILL_URL="https://github.com/${RELEASES_REPO}/raw/main/substrate/SKILLS.md"
+SKILL_BASE_URL="https://github.com/${RELEASES_REPO}/raw/main/substrate/skills"
+SKILL_FILES="SKILL.md commands.md workflows.md search.md specs.md domains.md"
+
+# Command-line options
+LOCAL_PATH=""
+SKILL_ONLY=false
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -38,6 +47,36 @@ warn() {
 error() {
     printf 'ERROR: %s\n' "$1" >&2
     exit 1
+}
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --local)
+                LOCAL_PATH="$2"
+                shift 2
+                ;;
+            --skill-only)
+                SKILL_ONLY=true
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: install.sh [--local <path>] [--skill-only]"
+                echo ""
+                echo "Options:"
+                echo "  --local <path>    Install skills from local codebase"
+                echo "  --skill-only      Only install skills (skip binary)"
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                ;;
+        esac
+    done
 }
 
 # ---------------------------------------------------------------------------
@@ -131,12 +170,33 @@ install_skill() {
 
     mkdir -p "${SKILL_DIR}"
 
-    if ! curl -fsSL -o "${SKILL_DIR}/SKILL.md" "${SKILL_URL}"; then
-        warn "Failed to download skill from ${SKILL_URL}; skipping."
-        return 0
+    if [ -n "${LOCAL_PATH}" ]; then
+        # Local mode: copy from local codebase
+        local_skills="${LOCAL_PATH}/skills"
+        if [ ! -d "${local_skills}" ]; then
+            error "Local skills directory not found: ${local_skills}"
+        fi
+        
+        for skill_file in ${SKILL_FILES}; do
+            src="${local_skills}/${skill_file}"
+            if [ -f "${src}" ]; then
+                cp "${src}" "${SKILL_DIR}/${skill_file}"
+                info "Installed (local): ${SKILL_DIR}/${skill_file}"
+            else
+                warn "Local file not found: ${src}; skipping."
+            fi
+        done
+    else
+        # Remote mode: download from releases repo
+        for skill_file in ${SKILL_FILES}; do
+            skill_url="${SKILL_BASE_URL}/${skill_file}"
+            if ! curl -fsSL -o "${SKILL_DIR}/${skill_file}" "${skill_url}"; then
+                warn "Failed to download ${skill_file} from ${skill_url}; skipping."
+            else
+                info "Installed: ${SKILL_DIR}/${skill_file}"
+            fi
+        done
     fi
-
-    info "Installed skill: ${SKILL_DIR}/SKILL.md"
 }
 
 # ---------------------------------------------------------------------------
@@ -173,15 +233,21 @@ verify_install() {
 # ---------------------------------------------------------------------------
 
 main() {
+    parse_args "$@"
+    
     info "Cogentry Substrate Installer"
 
-    check_prerequisites
-
-    platform="$(detect_platform)"
-
-    install_binary "${platform}"
+    if [ "${SKILL_ONLY}" = false ]; then
+        check_prerequisites
+        platform="$(detect_platform)"
+        install_binary "${platform}"
+    fi
+    
     install_skill
-    verify_install
+    
+    if [ "${SKILL_ONLY}" = false ]; then
+        verify_install
+    fi
 
     info "Done. Run 'cs --help' to get started."
 }
